@@ -67,27 +67,99 @@
             <button class="btn" :disabled="saving">{{ saving ? 'Reservando...' : 'Confirmar reserva' }}</button>
           </form>
 
-          <form v-if="createdReserva && !facturaOk" class="billing" @submit.prevent="generarFactura">
-            <h2>Datos de facturacion</h2>
-            <p>Completa estos datos para emitir la factura de la reserva.</p>
+          <section v-if="createdReserva && !facturaOk" class="payment-panel">
+            <div class="payment-heading">
+              <p class="eyebrow">Pago simulado</p>
+              <h2>Confirma tu pago</h2>
+              <p>Tu reserva ya fue creada. Al confirmar el pago se emitira y guardara la factura con tus datos.</p>
+            </div>
 
-            <label>Nombre o razon social</label>
-            <input v-model.trim="billing.nombre" type="text" />
+            <div class="payment-summary">
+              <div>
+                <span>Reserva</span>
+                <strong>{{ reservaCodigo }}</strong>
+              </div>
+              <div>
+                <span>Total</span>
+                <strong>${{ money(createdReserva.total || createdReserva.rev_total || total) }}</strong>
+              </div>
+            </div>
 
-            <label>Apellido</label>
-            <input v-model.trim="billing.apellido" type="text" />
+            <form class="payment-form" @submit.prevent="confirmarPago">
+              <div class="payment-card">
+                <span>Tarjeta de prueba</span>
+                <strong>{{ maskedCard }}</strong>
+                <small>{{ payment.cardName || 'Nombre del titular' }}</small>
+              </div>
 
-            <label>Correo</label>
-            <input v-model.trim="billing.correo" type="email" />
+              <label>Nombre en la tarjeta</label>
+              <input v-model.trim="payment.cardName" type="text" placeholder="Nombre del titular" />
 
-            <label>Telefono</label>
-            <input v-model.trim="billing.telefono" type="tel" />
+              <label>Numero de tarjeta</label>
+              <input
+                v-model="payment.cardNumber"
+                type="text"
+                inputmode="numeric"
+                maxlength="19"
+                placeholder="4242 4242 4242 4242"
+                @input="formatCardNumber"
+              />
 
-            <div v-if="billingError" class="notice bad">{{ billingError }}</div>
-            <button class="btn secondary" :disabled="billingSaving">{{ billingSaving ? 'Generando...' : 'Generar factura' }}</button>
-          </form>
+              <div class="form-row">
+                <div>
+                  <label>Vencimiento</label>
+                  <input v-model="payment.expiration" type="text" inputmode="numeric" maxlength="5" placeholder="MM/AA" @input="formatExpiration" />
+                </div>
+                <div>
+                  <label>CVV</label>
+                  <input v-model="payment.cvv" type="password" inputmode="numeric" maxlength="4" placeholder="123" />
+                </div>
+              </div>
 
-          <div v-if="facturaOk" class="notice ok">{{ facturaOk }}</div>
+              <div class="billing-title">
+                <h3>Datos para facturacion</h3>
+                <p>Estos datos se guardaran junto a la factura emitida.</p>
+              </div>
+
+              <label>Nombre o razon social</label>
+              <input v-model.trim="billing.nombre" type="text" />
+
+              <label>Apellido</label>
+              <input v-model.trim="billing.apellido" type="text" />
+
+              <label>Correo</label>
+              <input v-model.trim="billing.correo" type="email" />
+
+              <label>Telefono</label>
+              <input v-model.trim="billing.telefono" type="tel" />
+
+              <div v-if="billingError" class="notice bad">{{ billingError }}</div>
+              <button class="btn" :disabled="paymentSaving">{{ paymentSaving ? 'Procesando pago...' : 'Pagar y emitir factura' }}</button>
+            </form>
+          </section>
+
+          <section v-if="facturaOk" class="receipt">
+            <p class="eyebrow">Pago confirmado</p>
+            <h2>{{ facturaOk }}</h2>
+            <div class="receipt-grid">
+              <div>
+                <span>Factura</span>
+                <strong>{{ facturaNumero }}</strong>
+              </div>
+              <div>
+                <span>Reserva</span>
+                <strong>{{ facturaReservaCodigo }}</strong>
+              </div>
+              <div>
+                <span>Total pagado</span>
+                <strong>${{ money(facturaTotal) }}</strong>
+              </div>
+              <div>
+                <span>Estado</span>
+                <strong>{{ facturaEstado }}</strong>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
     </main>
@@ -99,7 +171,7 @@ import AppNav from "../../components/AppNav.vue";
 import { clientesApi, getStoredUser, isAuthenticated } from "../../services/api";
 import { setStoredUser } from "../../services/session";
 import {
-  crearFactura,
+  confirmarPagoReserva,
   crearReserva,
   dataOf,
   obtenerAtraccionDetalle,
@@ -112,12 +184,13 @@ export default {
   data: () => ({
     loading: false,
     saving: false,
-    billingSaving: false,
+    paymentSaving: false,
     error: "",
     formError: "",
     billingError: "",
     ok: "",
     facturaOk: "",
+    facturaData: null,
     atraccion: {},
     tickets: [],
     horarios: [],
@@ -134,6 +207,12 @@ export default {
       apellido: "",
       correo: "",
       telefono: "",
+    },
+    payment: {
+      cardName: "",
+      cardNumber: "",
+      expiration: "",
+      cvv: "",
     },
     fallback: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
   }),
@@ -153,6 +232,30 @@ export default {
     mainImage() {
       const candidates = [this.atraccion.imagenUrl, this.atraccion.urlImagen, ...(this.atraccion.imagenes || [])];
       return candidates.find((url) => typeof url === "string" && /^https?:\/\//i.test(url.trim())) || this.fallback;
+    },
+    createdReservaGuid() {
+      return this.createdReserva?.guid || this.createdReserva?.rev_guid || this.createdReserva?.reservaGuid || "";
+    },
+    reservaCodigo() {
+      return this.createdReserva?.codigo || this.createdReserva?.rev_codigo || this.createdReservaGuid || "Reserva";
+    },
+    maskedCard() {
+      const digits = (this.payment.cardNumber || "").replace(/\D/g, "");
+      if (!digits) return "#### #### #### ####";
+      const lastFour = digits.slice(-4).padStart(4, "#");
+      return `#### #### #### ${lastFour}`;
+    },
+    facturaNumero() {
+      return this.facturaData?.fac_numero || this.facturaData?.numero || this.facturaData?.facturaNumero || "Generada";
+    },
+    facturaReservaCodigo() {
+      return this.facturaData?.rev_codigo || this.facturaData?.reservaCodigo || this.reservaCodigo;
+    },
+    facturaTotal() {
+      return this.facturaData?.total || this.createdReserva?.total || this.createdReserva?.rev_total || this.total || 0;
+    },
+    facturaEstado() {
+      return this.facturaData?.estado || this.facturaData?.fac_estado || "Emitida";
     },
   },
   mounted() {
@@ -237,9 +340,25 @@ export default {
       this.billing.apellido = cliente.apellidos || this.billing.apellido;
       this.billing.correo = cliente.correo || this.billing.correo;
       this.billing.telefono = cliente.telefono || this.billing.telefono;
+      if (!this.payment.cardName) {
+        this.payment.cardName = [cliente.nombres, cliente.apellidos].filter(Boolean).join(" ") || this.billing.nombre;
+      }
+    },
+    formatCardNumber() {
+      const digits = (this.payment.cardNumber || "").replace(/\D/g, "").slice(0, 16);
+      this.payment.cardNumber = digits.replace(/(.{4})/g, "$1 ").trim();
+    },
+    formatExpiration() {
+      const digits = (this.payment.expiration || "").replace(/\D/g, "").slice(0, 4);
+      this.payment.expiration = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
     },
     validateBilling() {
-      if (!this.createdReserva?.guid) return "No se encontro la reserva para facturar.";
+      const cardDigits = (this.payment.cardNumber || "").replace(/\D/g, "");
+      if (!this.createdReservaGuid) return "No se encontro la reserva para facturar.";
+      if (!this.payment.cardName) return "Ingresa el nombre de la tarjeta.";
+      if (cardDigits.length < 12) return "Ingresa un numero de tarjeta de prueba valido.";
+      if (!/^\d{2}\/\d{2}$/.test(this.payment.expiration || "")) return "Ingresa el vencimiento en formato MM/AA.";
+      if (!/^\d{3,4}$/.test(this.payment.cvv || "")) return "Ingresa el CVV.";
       if (!this.billing.nombre) return "Ingresa el nombre o razon social.";
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.billing.correo || "")) return "Ingresa un correo valido.";
       return "";
@@ -267,7 +386,7 @@ export default {
         const response = await crearReserva(payload);
         const reserva = response.data ?? response;
         this.createdReserva = reserva;
-        this.ok = `Reserva creada correctamente. Codigo: ${reserva.codigo || reserva.guid}`;
+        this.ok = `Reserva creada correctamente. Codigo: ${reserva.codigo || reserva.rev_codigo || reserva.guid || reserva.rev_guid}`;
         if (this.cliente) this.prefillBilling(this.cliente);
       } catch (e) {
         this.formError = e.userMessage || "No se pudo crear la reserva.";
@@ -275,32 +394,29 @@ export default {
         this.saving = false;
       }
     },
-    async generarFactura() {
+    async confirmarPago() {
       this.billingError = this.validateBilling();
       if (this.billingError) return;
 
-      this.billingSaving = true;
+      this.paymentSaving = true;
       try {
         const payload = {
-          reservaGuid: this.createdReserva.guid,
-          total: Number(this.createdReserva.total || this.total || 0),
-          observacion: `Factura generada desde la reserva ${this.createdReserva.codigo || ""}`.trim(),
-          origenCanal: "WEB",
-          datosFacturacion: {
-            nombre: this.billing.nombre,
-            apellido: this.billing.apellido || null,
-            correo: this.billing.correo,
-            telefono: this.billing.telefono || null,
-          },
+          nombre_receptor: this.billing.nombre,
+          apellido_receptor: this.billing.apellido || null,
+          correo_receptor: this.billing.correo,
+          telefono_receptor: this.billing.telefono || null,
+          observacion: `Pago simulado desde el front para reserva ${this.reservaCodigo}`.trim(),
         };
 
-        const response = await crearFactura(payload);
+        const response = await confirmarPagoReserva(this.createdReservaGuid, payload);
         const factura = response.data ?? response;
-        this.facturaOk = `Factura generada correctamente. Numero: ${factura.numero || factura}`;
+        this.facturaData = factura;
+        this.facturaOk = `Factura emitida correctamente`;
+        this.ok = "";
       } catch (e) {
-        this.billingError = e.userMessage || "No se pudo generar la factura.";
+        this.billingError = e.userMessage || "No se pudo confirmar el pago.";
       } finally {
-        this.billingSaving = false;
+        this.paymentSaving = false;
       }
     },
   },
@@ -320,12 +436,24 @@ export default {
 .meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .meta span, .chips span { background: var(--sand-dark); border-radius: 999px; padding: 7px 10px; font-size: 12px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
-.booking, .billing, .auth-gate { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; display: grid; gap: 10px; }
+.booking, .auth-gate, .payment-panel, .receipt { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; display: grid; gap: 10px; }
 .auth-gate p { color: rgba(26,22,18,.65); }
-.billing p { color: rgba(26,22,18,.65); margin: 0; }
 .gate-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-.booking h2, .auth-gate h2 { font-size: 22px; }
-.booking label { font-weight: 800; font-size: 13px; }
+.booking h2, .auth-gate h2, .payment-heading h2, .receipt h2 { font-size: 22px; margin: 0; }
+.payment-heading p, .billing-title p { color: rgba(26,22,18,.65); margin: 4px 0 0; }
+.payment-summary, .receipt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.payment-summary div, .receipt-grid div { background: var(--sand); border-radius: var(--radius-md); padding: 12px; }
+.payment-summary span, .receipt-grid span { display: block; color: rgba(26,22,18,.58); font-size: 12px; margin-bottom: 4px; }
+.payment-summary strong, .receipt-grid strong { font-size: 18px; overflow-wrap: anywhere; }
+.payment-form { display: grid; gap: 10px; }
+.payment-card { background: #201711; color: white; border-radius: var(--radius-md); padding: 18px; min-height: 120px; display: grid; align-content: space-between; box-shadow: var(--shadow-soft); }
+.payment-card span, .payment-card small { color: rgba(255,255,255,.72); }
+.payment-card strong { font-size: 22px; letter-spacing: .08em; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.form-row > div { display: grid; gap: 10px; }
+.billing-title { margin-top: 8px; }
+.billing-title h3 { margin: 0; font-size: 18px; }
+.booking label, .payment-form label { font-weight: 800; font-size: 13px; }
 input, select { border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); padding: 11px 12px; }
 .total { display: flex; justify-content: space-between; align-items: center; background: var(--sand); border-radius: var(--radius-md); padding: 14px; }
 .total strong { font-size: 26px; }
@@ -340,5 +468,6 @@ input, select { border: 1.5px solid var(--border-strong); border-radius: var(--r
   .detail { grid-template-columns: 1fr; }
   .cover  { min-height: 300px; }
   .info h1 { font-size: 34px; }
+  .payment-summary, .receipt-grid, .form-row { grid-template-columns: 1fr; }
 }
 </style>

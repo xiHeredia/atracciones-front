@@ -1,4 +1,4 @@
-import { atraccionesApi, reservasApi, clientesApi, facturacionApi, unwrap } from "./api";
+import { atraccionesApi, reservasApi, clientesApi, facturacionApi, bookingApi, unwrap } from "./api";
 
 export const obtenerAtracciones = async (params = {}) => {
   const response = await atraccionesApi.get("/atracciones", { params });
@@ -47,6 +47,11 @@ export const crearReserva = async (reserva) => {
 
 export const crearFactura = async (factura) => {
   const response = await facturacionApi.post("/facturas", factura);
+  return response.data;
+};
+
+export const confirmarPagoReserva = async (reservaGuid, pago) => {
+  const response = await bookingApi.post(`/reservas/${reservaGuid}/pagos/confirmacion`, pago);
   return response.data;
 };
 

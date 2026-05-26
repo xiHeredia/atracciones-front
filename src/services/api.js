@@ -9,6 +9,17 @@ const serviceUrls = {
   facturacion: import.meta.env.VITE_API_URL || import.meta.env.VITE_FACTURACION_API_URL || "http://localhost:5023/api/v1",
 };
 
+const toBookingV2Url = (baseUrl) => {
+  const normalized = (baseUrl || "").replace(/\/+$/, "");
+  if (/\/api\/v1$/i.test(normalized)) return normalized.replace(/\/api\/v1$/i, "/api/v2");
+  if (/\/api\/v2$/i.test(normalized)) return normalized;
+  return `${normalized}/api/v2`;
+};
+
+const bookingV2Url =
+  import.meta.env.VITE_BOOKING_API_URL ||
+  toBookingV2Url(import.meta.env.VITE_API_URL || "http://localhost:5080/api/v1");
+
 const attachInterceptors = (client) => {
   client.interceptors.request.use((config) => {
     const raw = localStorage.getItem("user");
@@ -39,6 +50,7 @@ export const clientesApi = attachInterceptors(axios.create({ baseURL: serviceUrl
 export const atraccionesApi = attachInterceptors(axios.create({ baseURL: serviceUrls.atracciones, timeout: 20000 }));
 export const reservasApi = attachInterceptors(axios.create({ baseURL: serviceUrls.reservas, timeout: 20000 }));
 export const facturacionApi = attachInterceptors(axios.create({ baseURL: serviceUrls.facturacion, timeout: 20000 }));
+export const bookingApi = attachInterceptors(axios.create({ baseURL: bookingV2Url, timeout: 25000 }));
 
 export const apiFor = (service) => {
   const clients = {
@@ -47,6 +59,7 @@ export const apiFor = (service) => {
     atracciones: atraccionesApi,
     reservas: reservasApi,
     facturacion: facturacionApi,
+    booking: bookingApi,
   };
 
   return clients[service] || atraccionesApi;
