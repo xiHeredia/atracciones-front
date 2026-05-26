@@ -41,7 +41,7 @@
             <select v-model="form.ticketGuid" :disabled="Boolean(createdReserva)" @change="loadHorarios">
               <option value="">Seleccione ticket</option>
               <option v-for="t in tickets" :key="t.guid" :value="t.guid">
-                {{ t.titulo }} - ${{ money(t.precio) }} - cupos {{ t.cuposDisponibles }}
+                {{ t.titulo }} - ${{ money(t.precio) }} - cupos {{ ticketCuposDisponibles(t) }}
               </option>
             </select>
 
@@ -187,7 +187,7 @@ import { clientesApi, getStoredUser, isAuthenticated } from "../../services/api"
 import { setStoredUser } from "../../services/session";
 import {
   confirmarPagoReserva,
-  crearReserva,
+  crearReservaBooking,
   dataOf,
   obtenerAtraccionDetalle,
   obtenerHorariosTicket,
@@ -245,6 +245,9 @@ export default {
     total() {
       return Number(this.form.cantidad || 0) * Number(this.selectedTicket?.precio || 0);
     },
+    currentCuposDisponibles() {
+      return Number(this.selectedHorario?.cuposDisponibles ?? this.selectedTicket?.cuposDisponibles ?? 0);
+    },
     mainImage() {
       const candidates = [this.atraccion.imagenUrl, this.atraccion.urlImagen, ...(this.atraccion.imagenes || [])];
       return candidates.find((url) => typeof url === "string" && /^https?:\/\//i.test(url.trim())) || this.fallback;
@@ -300,6 +303,15 @@ export default {
   methods: {
     money(value) {
       return Number(value || 0).toFixed(2);
+    },
+    text(value, fallback = "") {
+      return typeof value === "string" && value.trim() ? value.trim() : fallback;
+    },
+    ticketCuposDisponibles(ticket) {
+      if (this.selectedHorario && ticket.guid === this.form.ticketGuid) {
+        return this.selectedHorario.cuposDisponibles;
+      }
+      return ticket.cuposDisponibles;
     },
     goLogin() {
       this.$router.push({ path: "/login", query: { redirect: this.$route.fullPath } });
@@ -365,10 +377,24 @@ export default {
       if (!this.form.ticketGuid) return "Selecciona un ticket.";
       if (!this.form.horarioGuid) return "Selecciona un horario.";
       if (Number(this.form.cantidad) < 1) return "La cantidad debe ser minimo 1.";
-      if (this.selectedHorario && Number(this.form.cantidad) > Number(this.selectedHorario.cuposDisponibles)) {
+      if (this.currentCuposDisponibles <= 0) return "No hay cupos disponibles para este horario.";
+      if (Number(this.form.cantidad) > this.currentCuposDisponibles) {
         return "La cantidad supera los cupos disponibles.";
       }
       return "";
+    },
+    buildClienteInvitado() {
+      const user = getStoredUser();
+      const cliente = this.cliente || user?.cliente || {};
+      return {
+        tipo_identificacion: this.text(cliente.tipoIdentificacion || cliente.tipo_identificacion, "CEDULA"),
+        numero_identificacion: this.text(cliente.numeroIdentificacion || cliente.numero_identificacion, "9999999999"),
+        nombres: this.text(cliente.nombres || this.billing.nombre || user?.userName, "Cliente"),
+        apellidos: this.text(cliente.apellidos || this.billing.apellido, "Web"),
+        correo: this.text(cliente.correo || this.billing.correo || user?.userName, "cliente@atracciones.local"),
+        telefono: this.text(cliente.telefono || this.billing.telefono, "0999999999"),
+        direccion: this.text(cliente.direccion, "Sin direccion"),
+      };
     },
     prefillBilling(cliente) {
       if (!cliente) return;
@@ -418,6 +444,7 @@ export default {
       this.form.horarioGuid = "";
       this.form.cantidad = 1;
       this.horarios = [];
+      this.load();
     },
     async reservar() {
       this.formError = this.validate();
@@ -427,19 +454,21 @@ export default {
       this.ok = "";
       try {
         const payload = {
+          at_guid: this.atraccion.guid || this.atraccion.at_guid || this.$route.params.guid,
+          hor_guid: this.form.horarioGuid,
           clienteGuid: this.clienteGuid,
-          horarioGuid: this.form.horarioGuid,
           origenCanal: "WEB",
-          detalles: [
+          cliente_invitado: this.buildClienteInvitado(),
+          lineas: [
             {
-              ticketGuid: this.form.ticketGuid,
+              tck_guid: this.form.ticketGuid,
               cantidad: Number(this.form.cantidad),
-              precioUnitario: Number(this.selectedTicket?.precio || 0),
+              precio_unitario: Number(this.selectedTicket?.precio || 0),
             },
           ],
         };
 
-        const response = await crearReserva(payload);
+        const response = await crearReservaBooking(payload);
         const reserva = response.data ?? response;
         this.createdReserva = reserva;
         this.showPayment = false;

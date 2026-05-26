@@ -45,6 +45,11 @@ export const crearReserva = async (reserva) => {
   return response.data;
 };
 
+export const crearReservaBooking = async (reserva) => {
+  const response = await bookingApi.post("/reservas", reserva);
+  return response.data;
+};
+
 export const crearFactura = async (factura) => {
   const response = await facturacionApi.post("/facturas", factura);
   return response.data;
