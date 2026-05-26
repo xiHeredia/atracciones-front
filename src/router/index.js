@@ -6,10 +6,12 @@ import AtraccionDetalle from "../views/cliente/AtraccionDetalle.vue";
 
 const routes = [
   { path: "/", redirect: "/cliente" },
+  { path: "/index.html", redirect: "/cliente" },
   { path: "/login", component: LoginView },
   { path: "/admin", component: AdminDashboard, meta: { requiresAuth: true, role: "ADMIN" } },
   { path: "/cliente", component: ClienteHome },
   { path: "/cliente/atraccion/:guid", component: AtraccionDetalle },
+  { path: "/:pathMatch(.*)*", redirect: "/cliente" },
 ];
 
 const router = createRouter({ history: createWebHistory(), routes });
