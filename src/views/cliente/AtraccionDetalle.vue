@@ -34,11 +34,11 @@
             </div>
           </section>
 
-          <form v-else class="booking" @submit.prevent="reservar">
+          <form v-else-if="!showPayment && !facturaOk" class="booking" @submit.prevent="createdReserva ? abrirPasarela() : reservar()">
             <h2>Crear reserva</h2>
 
             <label>Ticket</label>
-            <select v-model="form.ticketGuid" @change="loadHorarios">
+            <select v-model="form.ticketGuid" :disabled="Boolean(createdReserva)" @change="loadHorarios">
               <option value="">Seleccione ticket</option>
               <option v-for="t in tickets" :key="t.guid" :value="t.guid">
                 {{ t.titulo }} - ${{ money(t.precio) }} - cupos {{ t.cuposDisponibles }}
@@ -46,7 +46,7 @@
             </select>
 
             <label>Horario</label>
-            <select v-model="form.horarioGuid">
+            <select v-model="form.horarioGuid" :disabled="Boolean(createdReserva)">
               <option value="">Seleccione horario</option>
               <option v-for="h in horarios" :key="h.guid" :value="h.guid">
                 {{ h.fecha }} {{ h.horaInicio }} - {{ h.horaFin || 'sin fin' }} / cupos {{ h.cuposDisponibles }}
@@ -54,7 +54,7 @@
             </select>
 
             <label>Cantidad</label>
-            <input v-model.number="form.cantidad" type="number" min="1" />
+            <input v-model.number="form.cantidad" type="number" min="1" :disabled="Boolean(createdReserva)" />
 
             <div class="total">
               <span>Total estimado</span>
@@ -64,10 +64,11 @@
             <div v-if="formError" class="notice bad">{{ formError }}</div>
             <div v-if="ok" class="notice ok">{{ ok }}</div>
 
-            <button class="btn" :disabled="saving">{{ saving ? 'Reservando...' : 'Confirmar reserva' }}</button>
+            <button v-if="!createdReserva" class="btn" :disabled="saving">{{ saving ? 'Reservando...' : 'Confirmar reserva' }}</button>
+            <button v-else type="button" class="btn" @click="abrirPasarela">Confirmar pago</button>
           </form>
 
-          <section v-if="createdReserva && !facturaOk" class="payment-panel">
+          <section v-if="createdReserva && showPayment && !facturaOk" class="payment-panel">
             <div class="payment-heading">
               <p class="eyebrow">Pago simulado</p>
               <h2>Confirma tu pago</h2>
@@ -138,31 +139,45 @@
             </form>
           </section>
 
-          <section v-if="facturaOk" class="receipt">
-            <p class="eyebrow">Pago confirmado</p>
-            <h2>{{ facturaOk }}</h2>
-            <div class="receipt-grid">
-              <div>
-                <span>Factura</span>
-                <strong>{{ facturaNumero }}</strong>
-              </div>
-              <div>
-                <span>Reserva</span>
-                <strong>{{ facturaReservaCodigo }}</strong>
-              </div>
-              <div>
-                <span>Total pagado</span>
-                <strong>${{ money(facturaTotal) }}</strong>
-              </div>
-              <div>
-                <span>Estado</span>
-                <strong>{{ facturaEstado }}</strong>
-              </div>
-            </div>
-          </section>
         </div>
       </section>
     </main>
+
+    <div v-if="facturaOk" class="receipt-backdrop" @click.self="cerrarComprobante">
+      <section class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+        <button class="modal-close" type="button" aria-label="Cerrar comprobante" @click="cerrarComprobante">x</button>
+        <div class="success-mark">OK</div>
+        <h2 id="receipt-title">Pago confirmado</h2>
+        <p>Tu factura ha sido emitida correctamente y registrada con los datos de facturacion ingresados.</p>
+
+        <div class="invoice-number">
+          <span>Numero de factura</span>
+          <strong>{{ facturaNumero }}</strong>
+        </div>
+
+        <div class="receipt-grid">
+          <div>
+            <span>Codigo de reserva</span>
+            <strong>{{ facturaReservaCodigo }}</strong>
+          </div>
+          <div>
+            <span>Estado factura</span>
+            <strong class="status-pill">{{ facturaEstado }}</strong>
+          </div>
+          <div>
+            <span>Total pagado</span>
+            <strong>${{ money(facturaTotal) }}</strong>
+          </div>
+          <div>
+            <span>Fecha de emision</span>
+            <strong>{{ facturaFechaEmision }}</strong>
+          </div>
+        </div>
+
+        <button class="btn receipt-primary" type="button" @click="$router.push('/cliente')">Volver al listado de atracciones</button>
+        <button class="btn secondary" type="button" @click="cerrarComprobante">Cerrar comprobante</button>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -191,6 +206,7 @@ export default {
     ok: "",
     facturaOk: "",
     facturaData: null,
+    showPayment: false,
     atraccion: {},
     tickets: [],
     horarios: [],
@@ -255,7 +271,27 @@ export default {
       return this.facturaData?.total || this.createdReserva?.total || this.createdReserva?.rev_total || this.total || 0;
     },
     facturaEstado() {
-      return this.facturaData?.estado || this.facturaData?.fac_estado || "Emitida";
+      const estado = this.facturaData?.estado || this.facturaData?.fac_estado || "Emitida";
+      if (String(estado).toUpperCase() === "A") return "Activa";
+      if (String(estado).toUpperCase() === "I") return "Inactiva";
+      if (String(estado).toUpperCase() === "C") return "Cancelada";
+      return estado;
+    },
+    facturaFechaEmision() {
+      const raw =
+        this.facturaData?.fecha_emision ||
+        this.facturaData?.fechaEmision ||
+        this.facturaData?.fac_fecha_emision ||
+        new Date().toISOString();
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return String(raw);
+      return date.toLocaleString("es-EC", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     },
   },
   mounted() {
@@ -363,6 +399,26 @@ export default {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.billing.correo || "")) return "Ingresa un correo valido.";
       return "";
     },
+    abrirPasarela() {
+      this.formError = "";
+      this.billingError = "";
+      if (!this.createdReservaGuid) {
+        this.formError = "Primero crea la reserva para continuar al pago.";
+        return;
+      }
+      this.showPayment = true;
+    },
+    cerrarComprobante() {
+      this.facturaOk = "";
+      this.facturaData = null;
+      this.createdReserva = null;
+      this.showPayment = false;
+      this.ok = "";
+      this.form.ticketGuid = "";
+      this.form.horarioGuid = "";
+      this.form.cantidad = 1;
+      this.horarios = [];
+    },
     async reservar() {
       this.formError = this.validate();
       if (this.formError) return;
@@ -386,6 +442,7 @@ export default {
         const response = await crearReserva(payload);
         const reserva = response.data ?? response;
         this.createdReserva = reserva;
+        this.showPayment = false;
         this.ok = `Reserva creada correctamente. Codigo: ${reserva.codigo || reserva.rev_codigo || reserva.guid || reserva.rev_guid}`;
         if (this.cliente) this.prefillBilling(this.cliente);
       } catch (e) {
@@ -436,10 +493,10 @@ export default {
 .meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .meta span, .chips span { background: var(--sand-dark); border-radius: 999px; padding: 7px 10px; font-size: 12px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
-.booking, .auth-gate, .payment-panel, .receipt { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; display: grid; gap: 10px; }
+.booking, .auth-gate, .payment-panel { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; display: grid; gap: 10px; }
 .auth-gate p { color: rgba(26,22,18,.65); }
 .gate-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-.booking h2, .auth-gate h2, .payment-heading h2, .receipt h2 { font-size: 22px; margin: 0; }
+.booking h2, .auth-gate h2, .payment-heading h2 { font-size: 22px; margin: 0; }
 .payment-heading p, .billing-title p { color: rgba(26,22,18,.65); margin: 4px 0 0; }
 .payment-summary, .receipt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .payment-summary div, .receipt-grid div { background: var(--sand); border-radius: var(--radius-md); padding: 12px; }
@@ -455,6 +512,7 @@ export default {
 .billing-title h3 { margin: 0; font-size: 18px; }
 .booking label, .payment-form label { font-weight: 800; font-size: 13px; }
 input, select { border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); padding: 11px 12px; }
+input:disabled, select:disabled { background: #f7f3eb; color: rgba(26,22,18,.72); cursor: not-allowed; }
 .total { display: flex; justify-content: space-between; align-items: center; background: var(--sand); border-radius: var(--radius-md); padding: 14px; }
 .total strong { font-size: 26px; }
 .btn { border: 0; background: var(--ink); color: white; border-radius: var(--radius-sm); padding: 13px 16px; font-weight: 800; cursor: pointer; }
@@ -464,10 +522,24 @@ input, select { border: 1.5px solid var(--border-strong); border-radius: var(--r
 .bad { background: #fdebea; color: #8c2922; }
 .ok  { background: #e9f5ec; color: #285c35; }
 .loading { text-align: center; padding: 50px; }
+.receipt-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(26,22,18,.58); padding: 22px; }
+.receipt-modal { position: relative; width: min(520px, 100%); background: white; border-radius: 18px; padding: 30px; box-shadow: 0 30px 90px rgba(26,22,18,.28); text-align: center; }
+.modal-close { position: absolute; top: 16px; right: 18px; border: 0; background: transparent; color: rgba(26,22,18,.6); font-size: 22px; line-height: 1; cursor: pointer; }
+.success-mark { width: 58px; height: 58px; border-radius: 50%; background: #3ba86b; color: white; display: grid; place-items: center; margin: 0 auto 12px; font-weight: 900; box-shadow: 0 12px 30px rgba(59,168,107,.28); }
+.receipt-modal h2 { font-family: var(--font-display); font-size: 34px; margin: 6px 0 8px; }
+.receipt-modal p { max-width: 390px; margin: 0 auto 18px; color: rgba(26,22,18,.65); }
+.invoice-number { border: 1.5px dashed #cdbb86; background: #fff9dd; border-radius: var(--radius-md); padding: 14px; margin: 14px 0; }
+.invoice-number span { display: block; color: rgba(26,22,18,.55); font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.invoice-number strong { color: #9b5b4f; font-size: 18px; letter-spacing: .08em; overflow-wrap: anywhere; }
+.receipt-modal .receipt-grid { text-align: left; margin-bottom: 16px; }
+.status-pill { display: inline-block; width: fit-content; background: #dff5e8; color: #277248; border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+.receipt-primary { width: 100%; background: #9b5b4f; margin-bottom: 10px; }
+.receipt-modal .btn.secondary { width: 100%; background: white; border: 1.5px solid #9b5b4f; color: #9b5b4f; }
 @media (max-width: 900px) {
   .detail { grid-template-columns: 1fr; }
   .cover  { min-height: 300px; }
   .info h1 { font-size: 34px; }
   .payment-summary, .receipt-grid, .form-row { grid-template-columns: 1fr; }
+  .receipt-modal { padding: 24px 18px; }
 }
 </style>
